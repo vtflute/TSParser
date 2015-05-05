@@ -17,7 +17,7 @@ import tkinter.messagebox
 import tkinter.filedialog
 import sys
 from optparse import OptionParser
-from ctypes import Union, BigEndianStructure, c_uint
+from ctypes import *
 
 class SystemClock:
     def __init__(self):
@@ -199,7 +199,7 @@ def parsePATSection(filehandle, k):
             print(('program_map_PID = 0x%X' %program_map_PID))
         length = length - 4;
         j += 4
-        
+
         print('')
 
 def parsePMTSection(filehandle, k):
@@ -345,8 +345,73 @@ class TSHeader(Union):
 
         def __init__(self, data):
                 super(TSHeader, self).__init__()
-                self.value = struct.unpack('I', data.read(self.HEADER_LENGTH))[0]
-                self.data = data    #data except head
+                self.raw = data.read(self.HEADER_LENGTH)
+                self.value = struct.unpack('I', self.raw)[0]
+                self.data = data			#data except head
+
+class TSAdaptationField(Union):
+        class _AdaptationField(BigEndianStructure):
+                _fields_ = [
+                    ("adaptation_field_length", c_uint16, 8),
+                    ("discontinuity_indicator", c_uint16, 1),
+                    ("random_access_indicator", c_uint16 , 1),
+                    ("elementary_stream_priority_indicator", c_uint16, 1),
+                    ("PCR_flag", c_uint16, 1),
+                    ("OPCR_flag", c_uint16, 1),
+                    ("splicing_point_flag", c_uint16, 1),
+                    ("transport_private_data_flag", c_uint16, 1),
+                    ("adaptation_field_extension_flag", c_uint16, 1),
+                ]
+
+        class _PCR(Union):
+                class _PCRs(BigEndianStructure):
+                        _fields_ = [
+                            ("pcr_base", c_uint64, 33),
+                            ("pcr_padding", c_uint64, 6),
+                            ("pcr_extension", c_uint64, 9),
+                        ]
+                _anonymous_ = ("bits",)
+                _fields_ = [
+                    ("bits", _PCRs),
+                    ("value", c_uint64),
+                ]
+
+                def __init__(self, data):
+                        super(self._PCR, self).__init__()
+                        self.raw = data.read(6)
+                        self.value = int.from_bytes(self.raw, byteorder='big')
+                        self.data = data
+
+        _anonymous_ = ("bits", )
+        _fields_ = [
+            ("bits", _AdaptationField),
+            ("value", c_uint16)
+        ]
+
+        ADAPTION_FIELD_LENGTH =  2
+
+        def	__init__(self, data):
+                    super(TSAdaptationField, self).__init()
+                    self.raw = data.read(self.ADAPTION_FIELD_LENGTH)
+                    self.value = struct.unpack("H", self.raw)[0]
+                    self.data = data
+                    if  (self.PCR_flag == 1):
+                        self.PCR = self._PCR(self.data)
+                        self.data = self.PCR.data
+                    if (self.OPCR_flag == 1):
+                        self.OPCR = self._PCR(self.data)
+                        self.data = self.OPCR.data
+
+class TSPacket(object):
+
+    def __init__(self, filehandle):
+        self.head = TSHeader(filehandle)
+            if self.head.adapatation_field_ctrl & 0x2:
+                    #Parse adapation_field data
+                    self.adaption_field
+            if self.head.adapatation_field_ctrl & 0x1:
+                    #Parse payload field data
+                    self.payload_field
 
 def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
 
@@ -399,7 +464,7 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
 
             if (adaptation_field_ctrl == 0x2)|(adaptation_field_ctrl == 0x3):
                 [Adaptation_Field_Length, flags] = parseAdaptation_Field(filehandle,n+4,PCR)
-            
+
                 if ((searchItem == "PCR")&((flags>>4)&0x1)):
                     discontinuity = 'discontinuity: false'
                     if (((flags>>7)&0x1)):
@@ -460,14 +525,14 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
                                 for i in PIDList:
                                     if (i == PID):
                                         isUnique = False
-                                
+
                                 if isUnique:
                                     PIDList.append(PID)
                                 else:
                                     n += packet_size
                                     packetCount += 1
                                 continue
-                                
+
                             print(('pasing PAT Packet! packet No. %d, PID = 0x%X' %(packetCount, PID)))
                             parsePATSection(filehandle, k)
                             if (psi_mode == 0):
@@ -483,7 +548,7 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
                                 for i in PIDList:
                                     if (i == PID):
                                         isUnique = False
-                                
+
                                 if isUnique:
                                     PIDList.append(PID)
                                 else:
@@ -494,7 +559,7 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
                             parsePMTSection(filehandle, k)
                             if (psi_mode == 0):
                                 return
-                    
+
                     elif (table_id == 0x7F):
                         if (((searchItem == "FFF")&(mode == 'SIT')&(PID == pid))|(searchItem == "SIT")):
                             if ((psi_mode == 2)&(searchItem == "SIT")):
