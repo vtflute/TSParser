@@ -4,7 +4,9 @@
 #this Python script is used to parse MPEG-2 TS stream
 #
 #Author: Zhaohui Guo (guo.zhaohui@gmail.com)
+#              vtflute            (vtflute@gmail.com)
 #Copyright(c)2012 Zhaohui GUO
+#Copyright(c)2015 vtflute
 
 """this script is used to parse MPEG-2 TS stream.
 """
@@ -15,6 +17,7 @@ import tkinter.messagebox
 import tkinter.filedialog
 import sys
 from optparse import OptionParser
+from ctypes import Union, BigEndianStructure, c_uint
 
 class SystemClock:
     def __init__(self):
@@ -321,6 +324,30 @@ def parseSITSection(filehandle, k):
         length -= 4 + service_loop_length
     print('')
 
+
+
+class TSHeader(Union):
+        class _TSHeader(BigEndianStructure):
+                _fields_ =   [("syncByte", c_uint, 8),
+                                    ("transport_error_indicator", c_uint, 1),
+                                    ("payload_unit_start_indicator", c_uint, 1),
+                                    ("transport_priority", c_uint, 1),
+                                    ("pid", c_uint, 13),
+                                    ("scrambling_control", c_uint, 2),
+                                    ("adaptation_field_ctrl", c_uint, 2),
+                                    ("continuity_counter", c_uint, 4)]
+
+        _anonymous_ = ("bits",)
+        _fields_ =   [("bits", _TSHeader),
+                            ("value", c_uint),]
+
+        HEADER_LENGTH = 4
+
+        def __init__(self, data):
+                super(TSHeader, self).__init__()
+                self.value = struct.unpack('I', data.read(self.HEADER_LENGTH))[0]
+                self.data = data    #data except head
+
 def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
 
     PCR = SystemClock()
@@ -351,6 +378,7 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
                 ##packetCount += 1
                 ##rdi_count += 1
 
+
             PacketHeader = readFile(filehandle,n,4)
 
             syncByte = (PacketHeader>>24)
@@ -366,10 +394,10 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
 ##                print('payload_unit_start_indicator = %d' %payload_unit_start_indicator
 
 
-            adaptation_fieldc_trl = ((PacketHeader>>4)&0x3)
+            adaptation_field_ctrl = ((PacketHeader>>4)&0x3)
             Adaptation_Field_Length = 0
 
-            if (adaptation_fieldc_trl == 0x2)|(adaptation_fieldc_trl == 0x3):
+            if (adaptation_field_ctrl == 0x2)|(adaptation_field_ctrl == 0x3):
                 [Adaptation_Field_Length, flags] = parseAdaptation_Field(filehandle,n+4,PCR)
             
                 if ((searchItem == "PCR")&((flags>>4)&0x1)):
@@ -380,7 +408,7 @@ def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
                     print(('PCR packet, packet No. %d, PID = 0x%x, PCR_base = hi:0x%X lo:0x%X PCR_ext = 0x%X %s' \
                     %(packetCount, PID, PCR.PCR_base_hi, PCR.PCR_base_lo, PCR.PCR_extension, discontinuity)))
 
-            if (adaptation_fieldc_trl == 0x1)|(adaptation_fieldc_trl == 0x3):
+            if (adaptation_field_ctrl == 0x1)|(adaptation_field_ctrl == 0x3):
 
                 PESstartCode = readFile(filehandle,n+Adaptation_Field_Length+4,4)
 
@@ -577,14 +605,13 @@ def Main():
 
     if (opts.filename == ""):
         filename = getFilename()
-    
-    if (filename == ""):
-        return
-    else:
-        filename = opts.filename
+        if (filename == ""):
+            return
+        else:
+            opts.filename = filename
 
-    print(filename)
-    filehandle = open(filename,'rb')
+    print(opts.filename)
+    filehandle = open(opts.filename,'rb')
 
     parseTSMain(filehandle, opts.packet_size, opts.mode, pid, psi_mode, opts.searchItem)
 
