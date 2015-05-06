@@ -16,6 +16,7 @@ import tkinter
 import tkinter.messagebox
 import tkinter.filedialog
 import sys
+import io
 from optparse import OptionParser
 from ctypes import *
 
@@ -341,13 +342,11 @@ class TSHeader(Union):
         _fields_ =   [("bits", _TSHeader),
                             ("value", c_uint),]
 
-        HEADER_LENGTH = 4
-
         def __init__(self, data):
                 super(TSHeader, self).__init__()
-                self.raw = data.read(self.HEADER_LENGTH)
+                self.position = data.tell()
+                self.raw = data.read(4)
                 self.value = struct.unpack('I', self.raw)[0]
-                self.data = data			#data except head
 
 class TSAdaptationField(Union):
         class _AdaptationField(BigEndianStructure):
@@ -363,8 +362,8 @@ class TSAdaptationField(Union):
                     ("adaptation_field_extension_flag", c_uint16, 1),
                 ]
 
-        class _PCR(Union):
-                class _PCRs(BigEndianStructure):
+        class PCR(Union):
+                class _PCR(BigEndianStructure):
                         _fields_ = [
                             ("pcr_base", c_uint64, 33),
                             ("pcr_padding", c_uint64, 6),
@@ -372,15 +371,15 @@ class TSAdaptationField(Union):
                         ]
                 _anonymous_ = ("bits",)
                 _fields_ = [
-                    ("bits", _PCRs),
+                    ("bits", _PCR),
                     ("value", c_uint64),
                 ]
 
                 def __init__(self, data):
-                        super(self._PCR, self).__init__()
+                        super(TSAdaptationField.PCR, self).__init__()
+                        self.position = data.tell()
                         self.raw = data.read(6)
                         self.value = int.from_bytes(self.raw, byteorder='big')
-                        self.data = data
 
         _anonymous_ = ("bits", )
         _fields_ = [
@@ -388,30 +387,29 @@ class TSAdaptationField(Union):
             ("value", c_uint16)
         ]
 
-        ADAPTION_FIELD_LENGTH =  2
-
         def	__init__(self, data):
-                    super(TSAdaptationField, self).__init()
-                    self.raw = data.read(self.ADAPTION_FIELD_LENGTH)
+                    super(TSAdaptationField, self).__init__()
+                    self.position = data.tell()
+                    self.raw = data.read(2)
                     self.value = struct.unpack("H", self.raw)[0]
-                    self.data = data
+                    self.optional_fields = io.BytesIO(data.read(self.adaptation_field_length - 1))
                     if  (self.PCR_flag == 1):
-                        self.PCR = self._PCR(self.data)
-                        self.data = self.PCR.data
+                        self.pcr = self.PCR(self.optional_fields)
                     if (self.OPCR_flag == 1):
-                        self.OPCR = self._PCR(self.data)
-                        self.data = self.OPCR.data
+                        self.opcr = self.PCR(self.optional_fields)
+
 
 class TSPacket(object):
 
     def __init__(self, filehandle):
-        self.head = TSHeader(filehandle)
-            if self.head.adapatation_field_ctrl & 0x2:
-                    #Parse adapation_field data
-                    self.adaption_field
+            self.postition = filehandle.tell()
+            self.head = TSHeader(filehandle)
+            if self.head.adaptation_field_ctrl & 0x2:
+                        #Parse adapation_field data
+                        self.adaption_field = TSAdaptationField(filehandle)
             if self.head.adapatation_field_ctrl & 0x1:
-                    #Parse payload field data
-                    self.payload_field
+                        #Parse payload field data
+                        self.payload_field
 
 def parseTSMain(filehandle, packet_size, mode, pid, psi_mode, searchItem):
 
@@ -677,6 +675,11 @@ def Main():
 
     print(opts.filename)
     filehandle = open(opts.filename,'rb')
+
+    filehandle.seek(188*440)
+
+    #For test 
+    packet = TSPacket(filehandle)
 
     parseTSMain(filehandle, opts.packet_size, opts.mode, pid, psi_mode, opts.searchItem)
 
