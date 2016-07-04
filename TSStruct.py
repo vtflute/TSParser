@@ -5,76 +5,6 @@ import struct
 import sys
 from ctypes import *
 
-class TSHeader(Union):
-        class _TSHeader(BigEndianStructure):
-                _fields_ =   [("syncByte", c_uint, 8),
-                                    ("transport_error_indicator", c_uint, 1),
-                                    ("payload_unit_start_indicator", c_uint, 1),
-                                    ("transport_priority", c_uint, 1),
-                                    ("pid", c_uint, 13),
-                                    ("scrambling_control", c_uint, 2),
-                                    ("adaptation_field_ctrl", c_uint, 2),
-                                    ("continuity_counter", c_uint, 4)]
-
-        _anonymous_ = ("bits",)
-        _fields_ =   [("bits", _TSHeader),
-                            ("int", c_uint),]
-
-        def __init__(self, data):
-                super(TSHeader, self).__init__()
-                self.position = data.tell()
-                self.raw = data.read(4)
-                self.int = struct.unpack('I', self.raw)[0]
-
-class TSAdaptationField(Union):
-        class _AdaptationField(BigEndianStructure):
-                _fields_ = [
-                    ("adaptation_field_length", c_uint16, 8),
-                    ("discontinuity_indicator", c_uint16, 1),
-                    ("random_access_indicator", c_uint16 , 1),
-                    ("elementary_stream_priority_indicator", c_uint16, 1),
-                    ("PCR_flag", c_uint16, 1),
-                    ("OPCR_flag", c_uint16, 1),
-                    ("splicing_point_flag", c_uint16, 1),
-                    ("transport_private_data_flag", c_uint16, 1),
-                    ("adaptation_field_extension_flag", c_uint16, 1),
-                ]
-
-        class PCR(Union):
-                class _PCR(BigEndianStructure):
-                        _fields_ = [
-                            ("pcr_base", c_uint64, 33),
-                            ("pcr_padding", c_uint64, 6),
-                            ("pcr_extension", c_uint64, 9),
-                        ]
-                _anonymous_ = ("bits",)
-                _fields_ = [
-                    ("bits", _PCR),
-                    ("int", c_uint64),
-                ]
-
-                def __init__(self, data):
-                        super(TSAdaptationField.PCR, self).__init__()
-                        self.position = data.tell()
-                        self.raw = data.read(6)
-                        self.int = int.from_bytes(self.raw, byteorder='big')
-
-        _anonymous_ = ("bits", )
-        _fields_ = [
-            ("bits", _AdaptationField),
-            ("int", c_uint16)
-        ]
-
-        def __init__(self, data):
-                    super(TSAdaptationField, self).__init__()
-                    self.position = data.tell()
-                    self.raw = data.read(2)
-                    self.int = struct.unpack("H", self.raw)[0]
-                    self.optional_fields = io.BytesIO(data.read(self.adaptation_field_length - 1))
-                    if  (self.PCR_flag == 1):
-                        self.pcr = self.PCR(self.optional_fields)
-                    if (self.OPCR_flag == 1):
-                        self.opcr = self.PCR(self.optional_fields)
 
 
 class PTSPattern(Union):
@@ -205,29 +135,161 @@ class PES(Union):
 class TSPayloadFactory(object):
 
         def __init__(self, data, payload_unit_start_indicator):
-                self.probe(data)
+               super
 
-        def probe(self,data):
-                prefix = int.from_bytes(data.read(4), byteorder='big')
+
+        @classmethod
+        def probe(data):
+                prefix = int.from_bytes(data, byteorder='big')
                 if prefix & 0x00000100:
                         return 'PES'
                 else:
-                        return "PSI"
-                data.seek(-4, whence=io.SEEK_CUR)
+                        self.payload_type = 'PSI'
 
+class TSHeader(Union):
+        class _TSHeader(BigEndianStructure):
+                _fields_ =   [("syncByte", c_uint, 8),
+                                    ("transport_error_indicator", c_uint, 1),
+                                    ("payload_unit_start_indicator", c_uint, 1),
+                                    ("transport_priority", c_uint, 1),
+                                    ("pid", c_uint, 13),
+                                    ("scrambling_control", c_uint, 2),
+                                    ("adaptation_field_ctrl", c_uint, 2),
+                                    ("continuity_counter", c_uint, 4)]
+
+        _anonymous_ = ("bits",)
+        _fields_ =   [("bits", _TSHeader),
+                            ("int", c_uint),]
+
+        def __init__(self, data):
+                super(TSHeader, self).__init__()
+                self.int = struct.unpack('I', data)[0]
+
+class TSAdaptationField(Union):
+        class _AdaptationField(BigEndianStructure):
+                _fields_ = [
+                    ("adaptation_field_length", c_uint16, 8),
+                    ("discontinuity_indicator", c_uint16, 1),
+                    ("random_access_indicator", c_uint16 , 1),
+                    ("elementary_stream_priority_indicator", c_uint16, 1),
+                    ("PCR_flag", c_uint16, 1),
+                    ("OPCR_flag", c_uint16, 1),
+                    ("splicing_point_flag", c_uint16, 1),
+                    ("transport_private_data_flag", c_uint16, 1),
+                    ("adaptation_field_extension_flag", c_uint16, 1),
+                ]
+
+        class PCR(Union):
+                class _PCR(BigEndianStructure):
+                        _fields_ = [
+                            ("pcr_base", c_uint64, 33),
+                            ("pcr_padding", c_uint64, 6),
+                            ("pcr_extension", c_uint64, 9),
+                        ]
+                _anonymous_ = ("bits",)
+                _fields_ = [
+                    ("bits", _PCR),
+                    ("int", c_uint64),
+                ]
+
+                def __init__(self, data):
+                        super(TSAdaptationField.PCR, self).__init__()
+                        self.int = int.from_bytes(data, byteorder='big')
+
+        _anonymous_ = ("bits", )
+        _fields_ = [
+            ("bits", _AdaptationField),
+            ("int", c_uint16)
+        ]
+
+        def __init__(self, data):
+                    super(TSAdaptationField, self).__init__()
+                    field_offset = 0
+                    field_length = 2
+                    try:
+                        self.int = struct.unpack("H", data[field_offset: field_offset + field_length])[0]
+                    except :
+                        data[field_offset: field_offset + field_length]
+
+
+                    if  (self.PCR_flag == 1):
+
+                        field_offset = field_offset + field_length
+                        field_length = 6
+                        self.pcr = self.PCR(data[field_offset:field_offset + field_length])
+
+                    if (self.OPCR_flag == 1):
+                        field_offset = field_offset + field_length
+                        field_length = 6
+                        self.opcr = self.PCR(data[field_offset:field_offset + field_length])
 
 
 class TSPacket(object):
 
-    def __init__(self, filehandle):
-            self.postition = filehandle.tell()
-            self.head = TSHeader(filehandle)
+    def parse(self):
+            field_offset = 0
+            field_length = 4
+            self.head = TSHeader(self.data[field_offset: field_offset + field_length])
+
             if self.head.adaptation_field_ctrl & 0x2:
                         #Parse adapation_field data
-                        self.adaption_field = TSAdaptationField(filehandle)
+                        field_offset = field_offset + field_length
+                        field_length = int(self.data[field_offset]) + 1
+                        self.adaption_field = TSAdaptationField(self.data[field_offset: field_offset + field_length])
             if self.head.adaptation_field_ctrl & 0x1:
                         #Parse payload field data
-                        self.payload = TSPayloadFactory(filehandle, self.head.payload_unit_start_indicator)
+                        field_offset = field_offset + field_length
+                        self.payload = self.data[field_offset:]
+
+    @classmethod
+    def iterator(cls, data, packet_length):
+            yield  TSPacket(data)
+
+
+    def __init__(self, packet_data):
+            self.packet_length = len(packet_data)
+            self.data = packet_data
+            self.parse()
+
+class TSStream(object):
+
+    def __init__(self):
+            self.PIDMap = dict()
+
+
+    def findSyncByte(self):
+            seq = self.data.read(64*1024)
+            offset = seq.find(b'G')
+            length = seq.find(b'G', offset+1) - offset
+
+            return (offset, length)
+
+    def prepare(self):
+            (begin, packet_length) = self.findSyncByte()
+            self.data.seek(begin, io.SEEK_SET)
+            self.packet_length = packet_length
+
+    def locatePAT(self):
+            for packet in TSPacket.iterator(self.data, self.packet_length):
+                    if packet.head.pid == 0  :
+                            break
+
+            return packet
+
+    def read_packet_records(self, filehandle):
+        """Read a whole Transport Stream Packet Out"""
+        while True:
+            packet = filehandle.read(self.packet_length)
+            if not packet or len(packet) != self.packet_length:
+                break
+
+            yield packet
+
+    def parse(self, filehandle):
+            self.data = filehandle
+            self.prepare()
+            return map(lambda x: TSPacket(x),  self.read_packet_records(self.data))
+
 
 ##Following for Test
 import tkinter
@@ -249,4 +311,7 @@ if __name__ == "__main__":
     filehandle.seek(188*440)
 
     #For test
-    packet = TSPacket(filehandle)
+    stream = TSStream()
+    s = stream.parse(filehandle)
+    for i in s:
+        print(i)
