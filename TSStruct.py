@@ -5,10 +5,22 @@ import struct
 import sys
 from ctypes import *
 
+def from_bytes(input_bytes, byteorder='big'):
+    length = len(input_bytes)
+    if byteorder == 'big':
+        parts = struct.unpack((">%dB" % length), input_bytes)
+    elif byteorder == 'little':
+        parts = struct.unpack(("<%dB" % length), input_bytes)
+
+    integer = 0
+    for i in parts[0:-1]:
+        integer = integer * 255 + i
+    return integer
 
 
 class PTSPattern(Union):
-        class _Pattern (Structure):
+
+        class _Pattern(Structure):
                 _fields_ = [
                     ('prefix', c_int64, 4),
                     ('pts1', c_int64, 3),
@@ -28,7 +40,7 @@ class PTSPattern(Union):
                 super(PTSPattern, self).__init__()
                 self.position = data.tell()
                 self.raw = data.read(5)
-                self.int = int.from_bytes(self.raw, byteorder='big')
+                self.int = from_bytes(self.raw, byteorder='big')
                 self.value = self.pts3 + self.pts2 << 15 + self.pts1 << 30
 
 class PES(Union):
@@ -107,7 +119,7 @@ class PES(Union):
                         super(PES.MainStreamHeader, self).__init__();
                         self.position = data.tell()
                         self.raw = data.read(3)
-                        self.int = int.from_bytes(self.raw, byteorder='big')
+                        self.int = from_bytes(self.raw, byteorder='big')
                         self.optional_fields = io.BytesIO(data.read(self.pes_header_data_length))       #including stuffing fields
                         self.parsePTS(self.optional_fields)
 
@@ -120,7 +132,7 @@ class PES(Union):
                 super(PES, self).__init__()
                 self.position = data.tell()
                 self.raw = data.read(6)
-                self.int = int.from_bytes(self.raw, byteorder='big')
+                self.int = from_bytes(self.raw, byteorder='big')
                 #TODO not handle pes_packet_length == 0
                 self.variable_fields = io.BytesIO(data.read(self.pes_packet_length))
 
@@ -140,7 +152,7 @@ class TSPayloadFactory(object):
 
         @classmethod
         def probe(data):
-                prefix = int.from_bytes(data, byteorder='big')
+                prefix = from_bytes(data, byteorder='big')
                 if prefix & 0x00000100:
                         return 'PES'
                 else:
@@ -194,7 +206,7 @@ class TSAdaptationField(Union):
 
                 def __init__(self, data):
                         super(TSAdaptationField.PCR, self).__init__()
-                        self.int = int.from_bytes(data, byteorder='big')
+                        self.int = from_bytes(data, byteorder='big')
 
         _anonymous_ = ("bits", )
         _fields_ = [
@@ -234,7 +246,8 @@ class TSPacket(object):
             if self.head.adaptation_field_ctrl & 0x2:
                         #Parse adapation_field data
                         field_offset = field_offset + field_length
-                        field_length = int(self.data[field_offset]) + 1
+                        #field_length = struct.unpack(">B", self.data[field_offset])[0] + 1
+                        field_length = from_bytes(self.data[field_offset], byteorder='big') + 1    
                         self.adaption_field = TSAdaptationField(self.data[field_offset: field_offset + field_length])
             if self.head.adaptation_field_ctrl & 0x1:
                         #Parse payload field data
@@ -292,16 +305,9 @@ class TSStream(object):
 
 
 ##Following for Test
-import tkinter
-import tkinter.messagebox
-import tkinter.filedialog
 
 def getFilename():
-    root=tkinter.Tk()
-    fTyp=[('.ts File','*.ts'),('.TOD File','*.TOD'),('.trp File','*.trp'),('All Files','*.*')]
-    iDir='~/'
-    filename=tkinter.filedialog.askopenfilename(filetypes=fTyp,initialdir=iDir)
-    root.destroy()
+    filename = sys.argv[1]
     return filename;
 
 if __name__ == "__main__":
