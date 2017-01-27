@@ -9,12 +9,14 @@ def from_bytes(input_bytes, byteorder='big'):
     length = len(input_bytes)
     if byteorder == 'big':
         parts = struct.unpack((">%dB" % length), input_bytes)
+        parts = parts[0:-1]
     elif byteorder == 'little':
         parts = struct.unpack(("<%dB" % length), input_bytes)
+        parts = reversed(parts[0:-1])
 
     integer = 0
-    for i in parts[0:-1]:
-        integer = integer * 255 + i
+    for i in parts:
+        integer = i * 256 + integer
     return integer
 
 
