@@ -266,9 +266,8 @@ class TSStream(object):
     def findSyncByte(self):
         seq = self.data.read(64*1024)
         offset = seq.find(b'G')
-        length = seq.find(b'G', offset+1) - offset
-
-        return (offset, length)
+        #TODO how to dynamicly determine packet length
+        return (offset, 188)
 
     def prepare(self):
         (begin, packet_length) = self.findSyncByte()
@@ -294,7 +293,15 @@ class TSStream(object):
     def parse(self, filehandle):
         self.data = filehandle
         self.prepare()
-        return map(lambda x: TSPacket(x), self.read_packet_records(self.data))
+        packets = map(lambda x: TSPacket(x), self.read_packet_records(self.data))
+        for p in packets:
+            pid = p.head.pid
+            if pid not in self.PIDMap:
+                self.PIDMap[pid] = [p]
+            else:
+                pkt_queue = self.PIDMap[pid]
+                pkt_queue.append(p)
+        print(self.PIDMap)
 
 
 ##Following for Test
@@ -311,6 +318,4 @@ if __name__ == "__main__":
 
     #For test
     stream = TSStream()
-    s = stream.parse(filehandle)
-    for i in s:
-        print(i)
+    stream.parse(filehandle)
