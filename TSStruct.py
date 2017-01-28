@@ -231,21 +231,21 @@ class TSAdaptationField(Union):
 
 class TSPacket(object):
 
-    def parse(self):
+    def parse(self, data):
         field_offset = 0
         field_length = 4
-        self.head = TSHeader(self.data[field_offset: field_offset + field_length])
+        self.head = TSHeader(data[field_offset: field_offset + field_length])
 
         if self.head.adaptation_field_ctrl & 0x2:
             #Parse adapation_field data
             field_offset = field_offset + field_length
             #field_length = struct.unpack(">B", self.data[field_offset])[0] + 1
-            field_length = from_bytes(self.data[field_offset], byteorder='big') + 1
-            self.adaption_field = TSAdaptationField(self.data[field_offset: field_offset + field_length])
+            field_length = from_bytes(data[field_offset], byteorder='big') + 1
+            self.adaption_field = TSAdaptationField(data[field_offset: field_offset + field_length])
         if self.head.adaptation_field_ctrl & 0x1:
             #Parse payload field data
             field_offset = field_offset + field_length
-            self.payload = self.data[field_offset:]
+            self.payload = data[field_offset:]
 
     @classmethod
     def iterator(cls, data, packet_length):
@@ -255,7 +255,7 @@ class TSPacket(object):
     def __init__(self, packet_data):
         self.packet_length = len(packet_data)
         self.data = packet_data
-        self.parse()
+        self.parse(packet_data)
 
 class TSStream(object):
 
