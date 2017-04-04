@@ -321,7 +321,7 @@ class TSPayloadFactory(object):
         
         def parse(self):
             item = PES(self.cache)
-            if item and item.packet_start_code_prefix == b'001':
+            if item and item.packet_start_code_prefix == 1:
                 self.queue.append(item)
 
     def dispatch_worker(self, pid, data, payload_unit_start_indicator, factory_instance):
@@ -524,7 +524,7 @@ class TSStream(object):
                     queue = self.PIDMap[p.head.pid]
                     queue.append(payload)
                 except KeyError as e:
-                    self.PIDMap[p.head.pid] = [p.payload]
+                    self.PIDMap[p.head.pid] = [payload]
 
     def getPidManifest(self):
         return self.PIDMap.keys()
