@@ -394,12 +394,15 @@ class TSHeader(Union):
                     ("continuity_counter", c_uint, 4)]
 
     _anonymous_ = ("bits",)
+    _header_type = c_uint8 * 4
     _fields_ = [("bits", _TSHeader),
-                ("int", c_uint),]
+                ("int", _header_type),]
+    header_length = 4
 
     def __init__(self, data):
         super(TSHeader, self).__init__()
-        self.int = struct.unpack('I', data)[0]
+        ins = _from_bytes(data, byteorder='big')
+        self.int = TSHeader._header_type(*ins)
 
 class TSAdaptationField(Union):
     class _AdaptationField(BigEndianStructure):
@@ -419,55 +422,47 @@ class TSAdaptationField(Union):
                         ("pcr_padding", c_uint64, 6),
                         ("pcr_extension", c_uint64, 9),]
         _anonymous_ = ("bits",)
+        _field_type = c_uint8 * 6
         _fields_ = [("bits", _PCR),
-                    ("int", c_uint64),]
+                    ("int", _field_type),]
+        field_length = 6
 
         def __init__(self, data):
             super(TSAdaptationField.PCR, self).__init__()
-            self.int = integer_from_bytes(data, byteorder='big')
+            ins = _from_bytes(data, byteorder='big')
+            self.int = TSAdaptationField.PCR._field_type(*ins)
 
     _anonymous_ = ("bits", )
+    _field_type = c_uint8 * 2
     _fields_ = [("bits", _AdaptationField),
-                ("int", c_uint16)]
+                ("int", _field_type)]
+    field_length = 2
 
     def __init__(self, data):
         super(TSAdaptationField, self).__init__()
-        field_offset = 0
-        field_length = 2
-        try:
-            self.int = struct.unpack("H", data[field_offset: field_offset + field_length])[0]
-        except struct.error:
-            data[field_offset: field_offset + field_length]
+        d = io.BytesIO(data)
+        ins = _from_bytes(d.read(TSAdaptationField.field_length), byteorder='big')
+        self.int = TSAdaptationField._field_type(*ins)
 
         if  (self.PCR_flag == 1):
-
-            field_offset = field_offset + field_length
-            field_length = 6
-            self.pcr = self.PCR(data[field_offset:field_offset + field_length])
+            self.pcr = self.PCR(d.read(TSAdaptationField.PCR.field_length))
 
         if (self.OPCR_flag == 1):
-            field_offset = field_offset + field_length
-            field_length = 6
-            self.opcr = self.PCR(data[field_offset:field_offset + field_length])
+            self.opcr = self.PCR(d.read(TSAdaptationField.PCR.field_length))
 
 
 class TSPacket(object):
 
     def parse(self, data):
-        field_offset = 0
-        field_length = 4
-        self.head = TSHeader(data[field_offset: field_offset + field_length])
-
+        d = io.BytesIO(data)
+        self.head = TSHeader(d.read(TSHeader.header_length))
         if self.head.adaptation_field_ctrl & 0x2:
             #Parse adapation_field data
-            field_offset = field_offset + field_length
-            #field_length = struct.unpack(">B", self.data[field_offset])[0] + 1
-            field_length = integer_from_bytes(data[field_offset], byteorder='big') + 1
-            self.adaption_field = TSAdaptationField(data[field_offset: field_offset + field_length])
+            field_length = integer_from_bytes(d.read(1), byteorder='big')
+            self.adaption_field = TSAdaptationField(d.read(field_length))
         if self.head.adaptation_field_ctrl & 0x1:
             #Parse payload field data
-            field_offset = field_offset + field_length
-            self.payload = data[field_offset:]
+            self.payload = d.read()
 
     @classmethod
     def iterator(cls, data, packet_length):
@@ -476,7 +471,6 @@ class TSPacket(object):
 
     def __init__(self, packet_data):
         self.packet_length = len(packet_data)
-        self.data = packet_data
         self.parse(packet_data)
 
 class TSStream(object):
