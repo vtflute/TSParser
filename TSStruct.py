@@ -24,45 +24,44 @@ def integer_from_bytes(input_bytes, byteorder='big'):
 
 
 class PTSPattern(Union):
-
-    class _Pattern(Structure):
+    class _Pattern(BigEndianStructure):
         _fields_ = [
-            ('prefix', c_int64, 4),
-            ('pts1', c_int64, 3),
-            ('marker', c_int64, 1),
-            ('pts2', c_int64, 15),
-            ('marker', c_int64, 1),
-            ('pts3', c_int64, 15),
-            ('marker', c_int64, 1),
-            ]
+            ('prefix', c_uint, 4),
+            ('pts1', c_uint, 3),
+            ('marker', c_uint, 1),
+            ('pts2', c_uint, 15),
+            ('marker', c_uint, 1),
+            ('pts3', c_uint, 15),
+            ('marker', c_uint, 1),]
     _anonymous_ = ('bits',)
-    _fields_ = [
-        ('bits', _Pattern),
-        ('int', c_int64),]
+    _pattern_type = c_uint8 * 5
+    _fields_ = [('bits', _Pattern),
+                ('int', _pattern_type)]
+    pattern_length = 5
 
-    def __int__(self, data):
+    def __init__(self, data):
         super(PTSPattern, self).__init__()
-        self.position = data.tell()
-        self.raw = data.read(5)
-        self.int = integer_from_bytes(self.raw, byteorder='big')
+        ins = _from_bytes(data, byteorder='big')
+        self.int = PTSPattern._pattern_type(*ins)
         self.value = self.pts3 + self.pts2 << 15 + self.pts1 << 30
 
 class PES(Union):
-    class _PES(Structure):
+    class _PES(BigEndianStructure):
         _fields_ = [
-            ('packet_start_code_prefix', c_int32, 24),
-            ('stream_id', c_int32, 8),
-            ('pes_packet_length', c_int16, 16),
+            ('packet_start_code_prefix', c_uint, 24),
+            ('stream_id', c_uint, 8),
+            ('pes_packet_length', c_uint, 16),
             ]
 
     _anonymous_ = ("bits",)
+    _prefix_type = c_uint8 * 6
     _fields_ = [
         ("bits", _PES),
-        ("int", c_int64)
+        ("int", _prefix_type)
         ]
 
     def isPaddingStream(self):
-        if self.stread_id == 0xBE:
+        if self.stream_id == 0xBE:
             return True
         else:
             return False
@@ -85,34 +84,37 @@ class PES(Union):
             return False
 
     class MainStream(Union):
-        class _Header(Structure):
+        class _Header(BigEndianStructure):
             _fields_ = [
-                ('prefix', c_uint16, 2),
-                ('pes_scrambling_control', c_int16, 2),
-                ('pes_priority', c_int16, 1),
-                ('data_alignment_indicator', c_int16, 1),
-                ('copyright', c_int16, 1),
-                ('original_or_copy', c_int16, 1),
-                ('pts_dts_flag', c_int16, 2),
-                ('escr_flag', c_int16, 1),
-                ('es_rate_flag', c_int16, 1),
-                ('esm_trick_mode_flag', c_int16, 1),
-                ('additional_copy_info_flag', c_int16, 1),
-                ('pes_crc_flag', c_int16, 1),
-                ('pes_extension_flag', c_int16, 1),
-                ('pes_header_data_length', c_int8, 8),
-                ]
+                ('prefix', c_uint, 2),
+                ('pes_scrambling_control', c_uint, 2),
+                ('pes_priority', c_uint, 1),
+                ('data_alignment_indicator', c_uint, 1),
+                ('copyright', c_uint, 1),
+                ('original_or_copy', c_uint, 1),
+                ('pts_dts_flag', c_uint, 2),
+                ('escr_flag', c_uint, 1),
+                ('es_rate_flag', c_uint, 1),
+                ('esm_trick_mode_flag', c_uint, 1),
+                ('additional_copy_info_flag', c_uint, 1),
+                ('pes_crc_flag', c_uint, 1),
+                ('pes_extension_flag', c_uint, 1),
+                ('pes_header_data_length', c_uint, 8),]
         _anonymous_ = ('bits', )
+        _header_type = c_uint8 * 3
         _fields_ = [
             ('bits', _Header),
-            ('int', c_int32),
+            ('int', _header_type),
             ]
 
-        def parsePTS(self, data):
+        def parsePTS(self, d):
             if self.pts_dts_flag == 0x2:
+                data = d.read(PTSPattern.pattern_length)
                 self.PTS = PTSPattern(data)
             elif self.pts_dts_flag == 0x3:
+                data = d.read(PTSPattern.pattern_length)
                 self.PTS = PTSPattern(data)
+                data = d.read(PTSPattern.pattern_length)
                 self.DTS = PTSPattern(data)
             elif self.pts_dts_flag == 0x1:
                 print('pts_dts_flag 0x1')
@@ -120,29 +122,29 @@ class PES(Union):
                 print('pts_dts_flag 0x0')
 
         def __init__(self, data):
-            super(PES.MainStreamHeader, self).__init__()
-            self.position = data.tell()
-            self.raw = data.read(3)
-            self.int = integer_from_bytes(self.raw, byteorder='big')
-            self.optional_fields = io.BytesIO(data.read(self.pes_header_data_length))       #including stuffing fields
-            self.parsePTS(self.optional_fields)
-
+            super(PES.MainStream, self).__init__()
+            self._header_length = 3
+            self.pes_packet_length = len(data)
+            d = io.BytesIO(data)
+            ins = _from_bytes(d.read(self._header_length), byteorder='big')
+            self.int = PES.MainStream._header_type(*ins)
+            
+            self.parsePTS(d)
             self.payload_length = self.pes_packet_length - self.pes_header_data_length
-            self.payload = io.BytesIO(data.read(self.payload_type))
+            self.payload = d.read(self.payload_length)
 
-
-
-    def __init__(self, data, payload_unit_start_indicator):
+    def __init__(self, data):
         super(PES, self).__init__()
-        self.position = data.tell()
-        self.raw = data.read(6)
-        self.int = integer_from_bytes(self.raw, byteorder='big')
+        self.prefix_length = 6
+        d = io.BytesIO(data)
+        ins = _from_bytes(d.read(self.prefix_length), byteorder='big')
+        self.int = PES._prefix_type(*ins)
         #TODO not handle pes_packet_length == 0
-        self.variable_fields = io.BytesIO(data.read(self.pes_packet_length))
+        #self.variable_fields = io.BytesIO(d.read(self.pes_packet_length))
 
         if self.isMainStream():
             self.type = 'MainStream'
-            self.stream = self.MainStream(data)
+            self.stream = self.MainStream(d.read(self.pes_packet_length))
         elif self.isAuxillaryStream():
             self.type = 'AuxillaryStream'
         elif self.isPaddingStream():
@@ -214,7 +216,7 @@ class PMT(Union):
         length = self.section_length - self.program_info_length - 9 - 4
         while length:
             (stream_type, elementary_PID, es_info_length) = struct.unpack_from(">BHH", d.read(5))
-            elmentary_PID = elementary_PID & 0x1FFF
+            elementary_PID = elementary_PID & 0x1FFF
             es_info_length = es_info_length & 0x0FFF
             es_info = d.read(es_info_length)
             self.es_list.append({'elementary_PID':elementary_PID, 'es_info_length':es_info_length, 'es_info':es_info})          
@@ -313,13 +315,13 @@ class TSPayloadFactory(object):
                 self.queue.append(item)
 
     class PESWorker(Worker):
-        def __init__(self, pid):
-            super(TSPayloadFactory.PESWorker, self).__init__(pid)
+        def __init__(self, pid, payload_unit_start_indicator):
+            super(TSPayloadFactory.PESWorker, self).__init__(pid, payload_unit_start_indicator)
             self.type = 'PES'
         
         def parse(self):
             item = PES(self.cache)
-            if item:
+            if item and item.packet_start_code_prefix == b'001':
                 self.queue.append(item)
 
     def dispatch_worker(self, pid, data, payload_unit_start_indicator, factory_instance):
@@ -341,7 +343,8 @@ class TSPayloadFactory(object):
             pid_type = self.pid_type_map[pid]
             if pid_type == "PMT":
                 worker = TSPayloadFactory.PMTWorker(pid, payload_unit_start_indicator, TSPayloadFactory.report_callback, factory_instance)
-            #TODO PES Worker:
+            elif pid_type == "PES":
+                worker = TSPayloadFactory.PESWorker(pid, payload_unit_start_indicator)
         except KeyError:
             print("About pid %d, info not found in previous packet" % (pid))
             worker = None
