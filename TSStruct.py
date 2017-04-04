@@ -19,7 +19,7 @@ def integer_from_bytes(input_bytes, byteorder='big'):
     integer = 0
     parts = _from_bytes(input_bytes, byteorder)
     for i in parts:
-        integer = i + integer << 8
+        integer = i + (integer << 8)
     return integer
 
 
@@ -334,20 +334,21 @@ class TSPayloadFactory(object):
             print("found a Transport Stream Description Table packet")
         elif pid == 0x1FFF:
             print("found a NULL packet")
-
-        if data[0:3] == b'001' and payload_unit_start_indicator:
-            worker = TSPayloadFactory.PESWorker(pid, payload_unit_start_indicator)
-            self.pid_type_map[pid] = 'PES'
-
+    
         try:
-            pid_type = self.pid_type_map[pid]
+            pid_type = self.pid_type_map[pid]            
+        except KeyError:
+            if data[0:3] == b'\x00\x00\x01' and payload_unit_start_indicator:
+                worker = TSPayloadFactory.PESWorker(pid, payload_unit_start_indicator)
+                self.pid_type_map[pid] = 'PES'
+            else:
+                print("About pid %d, info not found in previous packet" % (pid))
+                worker = None
+        else:
             if pid_type == "PMT":
                 worker = TSPayloadFactory.PMTWorker(pid, payload_unit_start_indicator, TSPayloadFactory.report_callback, factory_instance)
             elif pid_type == "PES":
                 worker = TSPayloadFactory.PESWorker(pid, payload_unit_start_indicator)
-        except KeyError:
-            print("About pid %d, info not found in previous packet" % (pid))
-            worker = None
         #dispatch PMT and other workers here
         if worker:
             worker.feed(data, payload_unit_start_indicator)
