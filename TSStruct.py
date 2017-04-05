@@ -43,7 +43,83 @@ class PTSPattern(Union):
         super(PTSPattern, self).__init__()
         ins = _from_bytes(data, byteorder='big')
         self.int = PTSPattern._pattern_type(*ins)
-        self.value = self.pts3 + self.pts2 << 15 + self.pts1 << 30
+        self.value = self.pts3 + (self.pts2 << 15) + (self.pts1 << 30)
+
+class ESCRPattern(Union):
+    class _Pattern(BigEndianStructure):
+        _fields_ = [
+            ('reserved', c_uint, 2),
+            ('ESCR_base0', c_uint, 3),
+            ('marker_bit0', c_uint, 1),
+            ('ESCR_base1', c_uint, 15),
+            ('marker_bit1', c_uint, 1),
+            ('ESCR_base2', c_uint, 15),
+            ('marker_bit2', c_uint, 1),
+            ('ESCR_extension', c_uint, 9),
+            ('marker_bit3', c_uint, 1),]
+    _anonymous_ = ('bits',)
+    _pattern_type = c_uint8 * 6
+    _fields_ = [('bits', _Pattern),
+                ('int', _pattern_type)]
+    pattern_length = 6
+
+    def __init__(self, data):
+        super(ESCRPattern, self).__init__()
+        ins = _from_bytes(data, byteorder='big')
+        self.int = ESCRPattern._pattern_type(*ins)
+        self.value = (self.ESCR_base0 << 30) + (self.ESCR_base1 << 15) + self.ESCR_base2
+
+class ESratePattern(Union):
+    class _Pattern(BigEndianStructure):
+        _fields_ = [('marker_bit0', c_uint, 1),
+                    ('ES_rate', c_uint, 22),
+                    ('marker_bit1', c_uint, 1)]
+    _anonymous_ = ('bits',)
+    _pattern_type = c_uint8 * 3
+    _fields_ = [('bits', _Pattern),
+                ('int', _pattern_type)]
+    pattern_length = 3
+
+    def __init__(self, data):
+        super(ESratePattern, self).__init__()
+        ins = _from_bytes(data, byteorder='big')
+        self.int = ESCRPattern._pattern_type(*ins)
+        
+class DSMTrickModePattern(object):
+    class _ModePattern(Union):
+        class _FastForwardPattern(BigEndianStructure):
+            _fields_ = [('field_id', c_uint, 2),
+                        ('intra_slice_refresh', c_uint, 1),
+                        ('frequency_truncation', c_uint, 2)]
+        class _SlowMotionPattern(BigEndianStructure):
+            _fields_ = [('rep_cntrl', c_uint, 5),]
+        class _FreezeFramePattern(BigEndianStructure):
+            _fields_ = [('field_id', c_uint, 2),
+                        ('reserved', c_uint, 3)]
+        class _FastReversePattern(BigEndianStructure):
+            _fields_ = [('field_id', c_uint, 2),
+                        ('intra_slice_refresh', c_uint, 1),
+                        ('frequency_truncation', c_uint, 2)]
+        class _SlowReversePattern(BigEndianStructure):
+            _fields_ = [('rep_cntrl', c_uint, 5)]
+    
+        _fields_ = [('fast_forward', _FastForwardPattern),
+                    ('slow_motion', _SlowMotionPattern),
+                    ('freeze_frame', _FreezeFramePattern),
+                    ('fast_reverse', _FastReversePattern),
+                    ('slow_reverse', _SlowReversePattern),
+                    ('int', c_uint, 5)]
+        def __init__(self, integer):
+            super(DSMTrickModePattern._ModePattern, self).__init__()
+            self.int = integer & 0x1F
+
+    pattern_length = 1
+
+    def __init__(self, data):
+        super(DSMTrickModePattern, self).__init__()
+        ins = _from_bytes(data, byteorder='big')
+        self.trick_mode_control = ins & 0xE0
+        self.trick_mode = DSMTrickModePattern._ModePattern(ins)
 
 class PES(Union):
     class _PES(BigEndianStructure):
@@ -117,9 +193,44 @@ class PES(Union):
                 data = d.read(PTSPattern.pattern_length)
                 self.DTS = PTSPattern(data)
             elif self.pts_dts_flag == 0x1:
-                print('pts_dts_flag 0x1')
-            elif self.pts_dts_flag == 0x0:
-                print('pts_dts_flag 0x0')
+                print('pts_dts_flag 0x1 forbidden')
+
+        def parseESCR(self, d):
+            if self.escr_flag == 0x1:
+                data = d.read(ESCRPattern.pattern_length)
+                self.ESCR = ESCRPattern(data)
+
+        def parseESrate(self, d):
+            if self.es_rate_flag == 0x1:
+                data = d.read(ESratePattern.pattern_length)
+                self.ESrate = ESratePattern(data)
+
+        def parseDSMTrickMode(self, d):
+            if self.esm_trick_mode_flag == 0x1:
+                data = d.read(DSMTrickModePattern.pattern_length)
+                self.DSM_trick_mode = DSMTrickModePattern(data)
+
+        def parseAdditionalCopyInfo(self, d):
+            if self.additional_copy_info_flag == 0x1:
+                self.additional_copy_info = integer_from_bytes(d.read(1))
+
+        def parsePESCRC(self, d):
+            if self.pes_crc_flag == 0x1:
+                self.previous_PES_packet_CRC = integer_from_bytes(d.read(2))
+
+        def parsePESextension(self, d):
+            if self.pes_extension_flag == 0x1:
+                print('parse PES extension')
+
+        def parsePESHeaderData(self, d):
+            data = d.read(self.pes_header_data_length)
+            h = io.BytesIO(data)
+            self.parsePTS(h)
+            self.parseESCR(h)
+            self.parseESrate(h)
+            self.parseDSMTrickMode(h)
+            self.parseAdditionalCopyInfo(h)
+            self.parsePESextension(h)
 
         def __init__(self, data):
             super(PES.MainStream, self).__init__()
@@ -129,7 +240,7 @@ class PES(Union):
             ins = _from_bytes(d.read(self._header_length), byteorder='big')
             self.int = PES.MainStream._header_type(*ins)
             
-            self.parsePTS(d)
+            self.parsePESHeaderData(d)
             self.payload_length = self.pes_packet_length - self.pes_header_data_length
             self.payload = d.read(self.payload_length)
 
@@ -139,12 +250,14 @@ class PES(Union):
         d = io.BytesIO(data)
         ins = _from_bytes(d.read(self.prefix_length), byteorder='big')
         self.int = PES._prefix_type(*ins)
-        #TODO not handle pes_packet_length == 0
-        #self.variable_fields = io.BytesIO(d.read(self.pes_packet_length))
+        if self.pes_packet_length == 0:
+            pes_packet_length = -1
+        else:
+            pes_packet_length = self.pes_packet_length
 
         if self.isMainStream():
             self.type = 'MainStream'
-            self.stream = self.MainStream(d.read(self.pes_packet_length))
+            self.stream = self.MainStream(d.read(pes_packet_length))
         elif self.isAuxillaryStream():
             self.type = 'AuxillaryStream'
         elif self.isPaddingStream():
@@ -444,7 +557,7 @@ class TSAdaptationField(Union):
         ins = _from_bytes(d.read(TSAdaptationField.field_length), byteorder='big')
         self.int = TSAdaptationField._field_type(*ins)
 
-        if  (self.PCR_flag == 1):
+        if (self.PCR_flag == 1):
             self.pcr = self.PCR(d.read(TSAdaptationField.PCR.field_length))
 
         if (self.OPCR_flag == 1):
